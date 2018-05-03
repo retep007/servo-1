@@ -19,6 +19,7 @@ extern crate histogram;
 #[macro_use]
 extern crate html5ever;
 extern crate ipc_channel;
+#[macro_use] extern crate jstraceable_derive;
 #[macro_use]
 extern crate layout;
 extern crate layout_traits;
@@ -27,8 +28,10 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate log;
+#[macro_use] extern crate malloc_size_of_derive;
 extern crate malloc_size_of;
 extern crate metrics;
+extern crate mozjs as js;
 extern crate msg;
 extern crate net_traits;
 extern crate parking_lot;
@@ -38,6 +41,7 @@ extern crate range;
 extern crate rayon;
 extern crate script;
 extern crate script_layout_interface;
+extern crate script_servoparser;
 extern crate script_traits;
 extern crate selectors;
 extern crate serde_json;
