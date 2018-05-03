@@ -9,22 +9,23 @@ use dom::bindings::root::DomRoot;
 use dom::webglrenderingcontext::WebGLRenderingContext;
 use dom_struct::dom_struct;
 use super::{WebGLExtension, WebGLExtensions, WebGLExtensionSpec};
+use typeholder::TypeHolderTrait;
 
 #[dom_struct]
-pub struct EXTShaderTextureLod {
-    reflector_: Reflector,
+pub struct EXTShaderTextureLod<TH: TypeHolderTrait> {
+    reflector_: Reflector<TH>,
 }
 
-impl EXTShaderTextureLod {
+impl<TH: TypeHolderTrait> EXTShaderTextureLod<TH> {
     fn new_inherited() -> Self {
         Self { reflector_: Reflector::new() }
     }
 }
 
-impl WebGLExtension for EXTShaderTextureLod {
+impl<TH: TypeHolderTrait> WebGLExtension<TH> for EXTShaderTextureLod<TH> {
     type Extension = Self;
 
-    fn new(ctx: &WebGLRenderingContext) -> DomRoot<Self> {
+    fn new(ctx: &WebGLRenderingContext<TH>) -> DomRoot<Self> {
         reflect_dom_object(
             Box::new(Self::new_inherited()),
             &*ctx.global(),
@@ -36,7 +37,7 @@ impl WebGLExtension for EXTShaderTextureLod {
         WebGLExtensionSpec::Specific(WebGLVersion::WebGL1)
     }
 
-    fn is_supported(ext: &WebGLExtensions) -> bool {
+    fn is_supported(ext: &WebGLExtensions<TH>) -> bool {
         if cfg!(any(target_os = "android", target_os = "ios")) {
             return ext.supports_gl_extension("GL_EXT_shader_texture_lod");
         }
@@ -44,7 +45,7 @@ impl WebGLExtension for EXTShaderTextureLod {
         true
     }
 
-    fn enable(_ext: &WebGLExtensions) {}
+    fn enable(_ext: &WebGLExtensions<TH>) {}
 
     fn name() -> &'static str {
         "EXT_shader_texture_lod"

@@ -19,6 +19,7 @@ use dom::webglrenderingcontext::WebGLRenderingContext;
 use dom_struct::dom_struct;
 use std::cell::Cell;
 use std::cmp;
+use typeholder::TypeHolderTrait;
 
 pub enum TexParameterValue {
     Float(f32),
@@ -31,8 +32,8 @@ const MAX_FACE_COUNT: usize = 6;
 jsmanaged_array!(MAX_LEVEL_COUNT * MAX_FACE_COUNT);
 
 #[dom_struct]
-pub struct WebGLTexture {
-    webgl_object: WebGLObject,
+pub struct WebGLTexture<TH: TypeHolderTrait> {
+    webgl_object: WebGLObject<TH>,
     id: WebGLTextureId,
     /// The target to which this texture was bound the first time
     target: Cell<Option<u32>>,
@@ -50,8 +51,8 @@ pub struct WebGLTexture {
     attached_to_dom: Cell<bool>,
 }
 
-impl WebGLTexture {
-    fn new_inherited(context: &WebGLRenderingContext, id: WebGLTextureId) -> Self {
+impl<TH: TypeHolderTrait> WebGLTexture<TH> {
+    fn new_inherited(context: &WebGLRenderingContext<TH>, id: WebGLTextureId) -> Self {
         Self {
             webgl_object: WebGLObject::new_inherited(context),
             id: id,
@@ -66,13 +67,13 @@ impl WebGLTexture {
         }
     }
 
-    pub fn maybe_new(context: &WebGLRenderingContext) -> Option<DomRoot<Self>> {
+    pub fn maybe_new(context: &WebGLRenderingContext<TH>) -> Option<DomRoot<Self>> {
         let (sender, receiver) = webgl_channel().unwrap();
         context.send_command(WebGLCommand::CreateTexture(sender));
         receiver.recv().unwrap().map(|id| WebGLTexture::new(context, id))
     }
 
-    pub fn new(context: &WebGLRenderingContext, id: WebGLTextureId) -> DomRoot<Self> {
+    pub fn new(context: &WebGLRenderingContext<TH>, id: WebGLTextureId) -> DomRoot<Self> {
         reflect_dom_object(
             Box::new(WebGLTexture::new_inherited(context, id)),
             &*context.global(),
@@ -82,7 +83,7 @@ impl WebGLTexture {
 }
 
 
-impl WebGLTexture {
+impl<TH: TypeHolderTrait> WebGLTexture<TH> {
     pub fn id(&self) -> WebGLTextureId {
         self.id
     }
@@ -108,7 +109,7 @@ impl WebGLTexture {
             self.target.set(Some(target));
         }
 
-        self.upcast::<WebGLObject>()
+        self.upcast::<WebGLObject<TH>>()
             .context()
             .send_command(WebGLCommand::BindTexture(target, Some(self.id)));
 
@@ -164,7 +165,7 @@ impl WebGLTexture {
             return Err(WebGLError::InvalidOperation);
         }
 
-        self.upcast::<WebGLObject>()
+        self.upcast::<WebGLObject<TH>>()
             .context()
             .send_command(WebGLCommand::GenerateMipmap(target));
 
@@ -179,7 +180,7 @@ impl WebGLTexture {
     pub fn delete(&self) {
         if !self.is_deleted.get() {
             self.is_deleted.set(true);
-            let context = self.upcast::<WebGLObject>().context();
+            let context = self.upcast::<WebGLObject<TH>>().context();
             // Notify WR to release the frame output when using DOMToTexture feature
             if self.attached_to_dom.get() {
                 let _ = context.webgl_sender().send_dom_to_texture(
@@ -225,7 +226,7 @@ impl WebGLTexture {
                             constants::NEAREST_MIPMAP_LINEAR |
                             constants::LINEAR_MIPMAP_LINEAR => {
                                 self.min_filter.set(Some(int_value as u32));
-                                self.upcast::<WebGLObject>()
+                                self.upcast::<WebGLObject<TH>>()
                                     .context()
                                     .send_command(WebGLCommand::TexParameteri(target, int_param, int_value));
                                 Ok(())
@@ -237,7 +238,7 @@ impl WebGLTexture {
                         match int_value as u32 {
                             constants::NEAREST | constants::LINEAR => {
                                 self.mag_filter.set(Some(int_value as u32));
-                                self.upcast::<WebGLObject>()
+                                self.upcast::<WebGLObject<TH>>()
                                     .context()
                                     .send_command(WebGLCommand::TexParameteri(target, int_param, int_value));
                                 Ok(())
@@ -250,7 +251,7 @@ impl WebGLTexture {
                             constants::CLAMP_TO_EDGE |
                             constants::MIRRORED_REPEAT |
                             constants::REPEAT => {
-                                self.upcast::<WebGLObject>()
+                                self.upcast::<WebGLObject<TH>>()
                                     .context()
                                     .send_command(WebGLCommand::TexParameteri(target, int_param, int_value));
                                 Ok(())
@@ -262,7 +263,7 @@ impl WebGLTexture {
             }
             TexParameter::Float(float_param @ TexParameterFloat::TextureMaxAnisotropyExt) => {
                 if float_value >= 1. {
-                    self.upcast::<WebGLObject>()
+                    self.upcast::<WebGLObject<TH>>()
                         .context()
                         .send_command(WebGLCommand::TexParameterf(target, float_param, float_value));
                     Ok(())
@@ -397,7 +398,7 @@ impl WebGLTexture {
     }
 }
 
-impl Drop for WebGLTexture {
+impl<TH: TypeHolderTrait> Drop for WebGLTexture<TH> {
     fn drop(&mut self) {
         self.delete();
     }

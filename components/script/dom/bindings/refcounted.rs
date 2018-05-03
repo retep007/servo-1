@@ -38,17 +38,18 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 use task::TaskOnce;
+use typeholder::TypeHolderTrait;
 
 
 #[allow(missing_docs)]  // FIXME
 mod dummy {  // Attributes don’t apply through the macro.
     use std::cell::RefCell;
     use std::rc::Rc;
-    use super::LiveDOMReferences;
-    thread_local!(pub static LIVE_REFERENCES: Rc<RefCell<Option<LiveDOMReferences>>> =
-            Rc::new(RefCell::new(None)));
+    use super::LiveDOMReferencesTrait;
+    // thread_local!(pub static LIVE_REFERENCES: Rc<RefCell<Option<Box<LiveDOMReferencesTrait>>>> =
+    //         Rc::new(RefCell::new(None)));
 }
-pub use self::dummy::LIVE_REFERENCES;
+// pub use self::dummy::LIVE_REFERENCES;
 
 
 /// A pointer to a Rust DOM object that needs to be destroyed.
@@ -64,57 +65,59 @@ impl TrustedReference {
 /// A safe wrapper around a DOM Promise object that can be shared among threads for use
 /// in asynchronous operations. The underlying DOM object is guaranteed to live at least
 /// as long as the last outstanding `TrustedPromise` instance. These values cannot be cloned,
-/// only created from existing Rc<Promise> values.
-pub struct TrustedPromise {
-    dom_object: *const Promise,
+/// only created from existing Rc<Promise<TH>> values.
+pub struct TrustedPromise<TH: TypeHolderTrait> {
+    dom_object: *const Promise<TH>,
     owner_thread: *const libc::c_void,
 }
 
-unsafe impl Send for TrustedPromise {}
+unsafe impl<TH: TypeHolderTrait> Send for TrustedPromise<TH> {}
 
-impl TrustedPromise {
+impl<TH: TypeHolderTrait> TrustedPromise<TH> {
     /// Create a new `TrustedPromise` instance from an existing DOM object. The object will
     /// be prevented from being GCed for the duration of the resulting `TrustedPromise` object's
     /// lifetime.
     #[allow(unrooted_must_root)]
-    pub fn new(promise: Rc<Promise>) -> TrustedPromise {
-        LIVE_REFERENCES.with(|ref r| {
-            let r = r.borrow();
-            let live_references = r.as_ref().unwrap();
-            let ptr = &*promise as *const Promise;
-            live_references.addref_promise(promise);
-            TrustedPromise {
-                dom_object: ptr,
-                owner_thread: (&*live_references) as *const _ as *const libc::c_void,
-            }
-        })
+    pub fn new(promise: Rc<Promise<TH>>) -> TrustedPromise<TH> {
+        // LIVE_REFERENCES.with(|ref r| {
+        //     let r = r.borrow();
+        //     let live_references = r.as_ref().unwrap();
+        //     let ptr = &*promise as *const Promise;
+        //     live_references.addref_promise(promise);
+        //     TrustedPromise {
+        //         dom_object: ptr,
+        //         owner_thread: (&*live_references) as *const _ as *const libc::c_void,
+        //     }
+        // })
+        unimplemented!();
     }
 
     /// Obtain a usable DOM Promise from a pinned `TrustedPromise` value. Fails if used on
     /// a different thread than the original value from which this `TrustedPromise` was
     /// obtained.
     #[allow(unrooted_must_root)]
-    pub fn root(self) -> Rc<Promise> {
-        LIVE_REFERENCES.with(|ref r| {
-            let r = r.borrow();
-            let live_references = r.as_ref().unwrap();
-            assert_eq!(self.owner_thread, (&*live_references) as *const _ as *const libc::c_void);
-            // Borrow-check error requires the redundant `let promise = ...; promise` here.
-            let promise = match live_references.promise_table.borrow_mut().entry(self.dom_object) {
-                Occupied(mut entry) => {
-                    let promise = {
-                        let promises = entry.get_mut();
-                        promises.pop().expect("rooted promise list unexpectedly empty")
-                    };
-                    if entry.get().is_empty() {
-                        entry.remove();
-                    }
-                    promise
-                }
-                Vacant(_) => unreachable!(),
-            };
-            promise
-        })
+    pub fn root(self) -> Rc<Promise<TH>> {
+        // LIVE_REFERENCES.with(|ref r| {
+        //     let r = r.borrow();
+        //     let live_references = r.as_ref().unwrap();
+        //     assert_eq!(self.owner_thread, (&*live_references) as *const _ as *const libc::c_void);
+        //     // Borrow-check error requires the redundant `let promise = ...; promise` here.
+        //     let promise = match live_references.promise_table.borrow_mut().entry(self.dom_object) {
+        //         Occupied(mut entry) => {
+        //             let promise = {
+        //                 let promises = entry.get_mut();
+        //                 promises.pop().expect("rooted promise list unexpectedly empty")
+        //             };
+        //             if entry.get().is_empty() {
+        //                 entry.remove();
+        //             }
+        //             promise
+        //         }
+        //         Vacant(_) => unreachable!(),
+        //     };
+        //     promise
+        // })
+        unimplemented!();
     }
 
     /// A task which will reject the promise.
@@ -161,27 +164,29 @@ impl<T: DomObject> Trusted<T> {
     /// be prevented from being GCed for the duration of the resulting `Trusted<T>` object's
     /// lifetime.
     pub fn new(ptr: &T) -> Trusted<T> {
-        LIVE_REFERENCES.with(|ref r| {
-            let r = r.borrow();
-            let live_references = r.as_ref().unwrap();
-            let refcount = live_references.addref(&*ptr as *const T);
-            Trusted {
-                refcount: refcount,
-                owner_thread: (&*live_references) as *const _ as *const libc::c_void,
-                phantom: PhantomData,
-            }
-        })
+        // LIVE_REFERENCES.with(|ref r| {
+        //     let r = r.borrow();
+        //     let live_references = r.as_ref().unwrap();
+        //     let refcount = live_references.addref(&*ptr as *const T);
+        //     Trusted {
+        //         refcount: refcount,
+        //         owner_thread: (&*live_references) as *const _ as *const libc::c_void,
+        //         phantom: PhantomData,
+        //     }
+        // })
+        unimplemented!();
+
     }
 
     /// Obtain a usable DOM pointer from a pinned `Trusted<T>` value. Fails if used on
     /// a different thread than the original value from which this `Trusted<T>` was
     /// obtained.
     pub fn root(&self) -> DomRoot<T> {
-        assert!(LIVE_REFERENCES.with(|ref r| {
-            let r = r.borrow();
-            let live_references = r.as_ref().unwrap();
-            self.owner_thread == (&*live_references) as *const _ as *const libc::c_void
-        }));
+        // assert!(LIVE_REFERENCES.with(|ref r| {
+        //     let r = r.borrow();
+        //     let live_references = r.as_ref().unwrap();
+        //     self.owner_thread == (&*live_references) as *const _ as *const libc::c_void
+        // }));
         unsafe {
             DomRoot::from_ref(&*(self.refcount.0 as *const T))
         }
@@ -201,25 +206,29 @@ impl<T: DomObject> Clone for Trusted<T> {
 /// The set of live, pinned DOM objects that are currently prevented
 /// from being garbage collected due to outstanding references.
 #[allow(unrooted_must_root)]
-pub struct LiveDOMReferences {
+pub struct LiveDOMReferences<TH: TypeHolderTrait> {
     // keyed on pointer to Rust DOM object
     reflectable_table: RefCell<HashMap<*const libc::c_void, Weak<TrustedReference>>>,
-    promise_table: RefCell<HashMap<*const Promise, Vec<Rc<Promise>>>>,
+    promise_table: RefCell<HashMap<*const Promise<TH>, Vec<Rc<Promise<TH>>>>>,
 }
 
-impl LiveDOMReferences {
+pub trait LiveDOMReferencesTrait {
+
+}
+
+impl<TH: TypeHolderTrait> LiveDOMReferences<TH> {
     /// Set up the thread-local data required for storing the outstanding DOM references.
     pub fn initialize() {
-        LIVE_REFERENCES.with(|ref r| {
-            *r.borrow_mut() = Some(LiveDOMReferences {
-                reflectable_table: RefCell::new(HashMap::new()),
-                promise_table: RefCell::new(HashMap::new()),
-            })
-        });
+        // LIVE_REFERENCES.with(|ref r| {
+        //     *r.borrow_mut() = Some(LiveDOMReferences {
+        //         reflectable_table: RefCell::new(HashMap::new()),
+        //         promise_table: RefCell::new(HashMap::new()),
+        //     })
+        // });
     }
 
     #[allow(unrooted_must_root)]
-    fn addref_promise(&self, promise: Rc<Promise>) {
+    fn addref_promise(&self, promise: Rc<Promise<TH>>) {
         let mut table = self.promise_table.borrow_mut();
         table.entry(&*promise).or_insert(vec![]).push(promise)
     }
@@ -268,23 +277,23 @@ fn remove_nulls<K: Eq + Hash + Clone, V> (table: &mut HashMap<K, Weak<V>>) {
 #[allow(unrooted_must_root)]
 pub unsafe fn trace_refcounted_objects(tracer: *mut JSTracer) {
     info!("tracing live refcounted references");
-    LIVE_REFERENCES.with(|ref r| {
-        let r = r.borrow();
-        let live_references = r.as_ref().unwrap();
-        {
-            let mut table = live_references.reflectable_table.borrow_mut();
-            remove_nulls(&mut table);
-            for obj in table.keys() {
-                let reflectable = &*(*obj as *const Reflector);
-                trace_reflector(tracer, "refcounted", reflectable);
-            }
-        }
+    // LIVE_REFERENCES.with(|ref r| {
+    //     let r = r.borrow();
+    //     let live_references = r.as_ref().unwrap();
+    //     {
+    //         let mut table = live_references.reflectable_table.borrow_mut();
+    //         remove_nulls(&mut table);
+    //         for obj in table.keys() {
+    //             let reflectable = &*(*obj as *const Reflector);
+    //             trace_reflector(tracer, "refcounted", reflectable);
+    //         }
+    //     }
 
-        {
-            let table = live_references.promise_table.borrow_mut();
-            for promise in table.keys() {
-                trace_reflector(tracer, "refcounted", (**promise).reflector());
-            }
-        }
-    });
+    //     {
+    //         let table = live_references.promise_table.borrow_mut();
+    //         for promise in table.keys() {
+    //             trace_reflector(tracer, "refcounted", (**promise).reflector());
+    //         }
+    //     }
+    // });
 }

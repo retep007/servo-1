@@ -25,6 +25,7 @@ use std::iter::FromIterator;
 use std::ptr::NonNull;
 use super::{ext, WebGLExtension, WebGLExtensionSpec};
 use super::wrapper::{WebGLExtensionWrapper, TypedWebGLExtensionWrapper};
+use typeholder::TypeHolderTrait;
 
 // Data types that are implemented for texImage2D and texSubImage2D in a WebGL 1.0 context
 // but must trigger a InvalidValue error until the related WebGL Extensions are enabled.
@@ -64,12 +65,12 @@ const DEFAULT_DISABLED_GET_VERTEX_ATTRIB_NAMES_WEBGL1: [GLenum; 1] = [
 
 /// WebGL features that are enabled/disabled by WebGL Extensions.
 #[derive(JSTraceable, MallocSizeOf)]
-struct WebGLExtensionFeatures {
+struct WebGLExtensionFeatures<TH: TypeHolderTrait> {
     gl_extensions: FnvHashSet<String>,
     disabled_tex_types: FnvHashSet<GLenum>,
     not_filterable_tex_types: FnvHashSet<GLenum>,
     effective_tex_internal_formats: FnvHashMap<TexFormatType, u32>,
-    query_parameter_handlers: FnvHashMap<GLenum, WebGLQueryParameterHandler>,
+    query_parameter_handlers: FnvHashMap<GLenum, WebGLQueryParameterHandler<TH>>,
     /// WebGL Hint() targets enabled by extensions.
     hint_targets: FnvHashSet<GLenum>,
     /// WebGL GetParameter() names enabled by extensions.
@@ -84,7 +85,7 @@ struct WebGLExtensionFeatures {
     blend_minmax_enabled: bool,
 }
 
-impl WebGLExtensionFeatures {
+impl<TH: TypeHolderTrait> WebGLExtensionFeatures<TH> {
     fn new(webgl_version: WebGLVersion) -> Self {
         let (
             disabled_tex_types,
@@ -134,14 +135,14 @@ impl WebGLExtensionFeatures {
 /// Handles the list of implemented, supported and enabled WebGL extensions.
 #[must_root]
 #[derive(JSTraceable, MallocSizeOf)]
-pub struct WebGLExtensions {
-    extensions: DomRefCell<HashMap<String, Box<WebGLExtensionWrapper>>>,
-    features: DomRefCell<WebGLExtensionFeatures>,
+pub struct WebGLExtensions<TH: TypeHolderTrait> {
+    extensions: DomRefCell<HashMap<String, Box<WebGLExtensionWrapper<TH>>>>,
+    features: DomRefCell<WebGLExtensionFeatures<TH>>,
     webgl_version: WebGLVersion,
 }
 
-impl WebGLExtensions {
-    pub fn new(webgl_version: WebGLVersion) -> WebGLExtensions {
+impl<TH: TypeHolderTrait> WebGLExtensions<TH> {
+    pub fn new(webgl_version: WebGLVersion) -> WebGLExtensions<TH> {
         Self {
             extensions: DomRefCell::new(HashMap::new()),
             features: DomRefCell::new(WebGLExtensionFeatures::new(webgl_version)),
@@ -158,9 +159,9 @@ impl WebGLExtensions {
         }
     }
 
-    pub fn register<T:'static + WebGLExtension + JSTraceable + MallocSizeOf>(&self) {
+    pub fn register<T:'static + WebGLExtension<TH> + JSTraceable + MallocSizeOf>(&self) {
         let name = T::name().to_uppercase();
-        self.extensions.borrow_mut().insert(name, Box::new(TypedWebGLExtensionWrapper::<T>::new()));
+        self.extensions.borrow_mut().insert(name, Box::new(TypedWebGLExtensionWrapper::<T, TH>::new()));
     }
 
     pub fn get_suported_extensions(&self) -> Vec<&'static str> {
@@ -177,7 +178,7 @@ impl WebGLExtensions {
                                 .collect()
     }
 
-    pub fn get_or_init_extension(&self, name: &str, ctx: &WebGLRenderingContext) -> Option<NonNull<JSObject>> {
+    pub fn get_or_init_extension(&self, name: &str, ctx: &WebGLRenderingContext<TH>) -> Option<NonNull<JSObject>> {
         let name = name.to_uppercase();
         self.extensions.borrow().get(&name).and_then(|extension| {
             if extension.is_supported(self) {
@@ -190,7 +191,7 @@ impl WebGLExtensions {
 
     pub fn is_enabled<T>(&self) -> bool
     where
-        T: 'static + WebGLExtension + JSTraceable + MallocSizeOf
+        T: 'static + WebGLExtension<TH> + JSTraceable + MallocSizeOf
     {
         let name = T::name().to_uppercase();
         self.extensions.borrow().get(&name).map_or(false, |ext| { ext.is_enabled() })
@@ -198,11 +199,11 @@ impl WebGLExtensions {
 
     pub fn get_dom_object<T>(&self) -> Option<DomRoot<T::Extension>>
     where
-        T: 'static + WebGLExtension + JSTraceable + MallocSizeOf
+        T: 'static + WebGLExtension<TH> + JSTraceable + MallocSizeOf
     {
         let name = T::name().to_uppercase();
         self.extensions.borrow().get(&name).and_then(|extension| {
-            extension.as_any().downcast_ref::<TypedWebGLExtensionWrapper<T>>().and_then(|extension| {
+            extension.as_any().downcast_ref::<TypedWebGLExtensionWrapper<T, TH>>().and_then(|extension| {
                 extension.dom_object()
             })
         })
@@ -252,14 +253,14 @@ impl WebGLExtensions {
         self.features.borrow().not_filterable_tex_types.get(&text_data_type).is_none()
     }
 
-    pub fn add_query_parameter_handler(&self, name: GLenum, f: Box<WebGLQueryParameterFunc>) {
+    pub fn add_query_parameter_handler(&self, name: GLenum, f: Box<WebGLQueryParameterFunc<TH>>) {
         let handler = WebGLQueryParameterHandler {
             func: f
         };
         self.features.borrow_mut().query_parameter_handlers.insert(name, handler);
     }
 
-    pub fn get_query_parameter_handler(&self, name: GLenum) -> Option<Ref<Box<WebGLQueryParameterFunc>>> {
+    pub fn get_query_parameter_handler(&self, name: GLenum) -> Option<Ref<Box<WebGLQueryParameterFunc<TH>>>> {
         ref_filter_map(self.features.borrow(), |features| {
             features.query_parameter_handlers.get(&name).map(|item| &item.func)
         })
@@ -298,17 +299,17 @@ impl WebGLExtensions {
     }
 
     fn register_all_extensions(&self) {
-        self.register::<ext::angleinstancedarrays::ANGLEInstancedArrays>();
-        self.register::<ext::extblendminmax::EXTBlendMinmax>();
-        self.register::<ext::extshadertexturelod::EXTShaderTextureLod>();
-        self.register::<ext::exttexturefilteranisotropic::EXTTextureFilterAnisotropic>();
-        self.register::<ext::oeselementindexuint::OESElementIndexUint>();
-        self.register::<ext::oesstandardderivatives::OESStandardDerivatives>();
-        self.register::<ext::oestexturefloat::OESTextureFloat>();
-        self.register::<ext::oestexturefloatlinear::OESTextureFloatLinear>();
-        self.register::<ext::oestexturehalffloat::OESTextureHalfFloat>();
-        self.register::<ext::oestexturehalffloatlinear::OESTextureHalfFloatLinear>();
-        self.register::<ext::oesvertexarrayobject::OESVertexArrayObject>();
+        self.register::<ext::angleinstancedarrays::ANGLEInstancedArrays::<TH>>();
+        self.register::<ext::extblendminmax::EXTBlendMinmax::<TH>>();
+        self.register::<ext::extshadertexturelod::EXTShaderTextureLod::<TH>>();
+        self.register::<ext::exttexturefilteranisotropic::EXTTextureFilterAnisotropic::<TH>>();
+        self.register::<ext::oeselementindexuint::OESElementIndexUint::<TH>>();
+        self.register::<ext::oesstandardderivatives::OESStandardDerivatives::<TH>>();
+        self.register::<ext::oestexturefloat::OESTextureFloat::<TH>>();
+        self.register::<ext::oestexturefloatlinear::OESTextureFloatLinear::<TH>>();
+        self.register::<ext::oestexturehalffloat::OESTextureHalfFloat::<TH>>();
+        self.register::<ext::oestexturehalffloatlinear::OESTextureHalfFloatLinear::<TH>>();
+        self.register::<ext::oesvertexarrayobject::OESVertexArrayObject::<TH>>();
     }
 
     pub fn enable_element_index_uint(&self) {
@@ -332,13 +333,13 @@ impl WebGLExtensions {
 #[derive(Eq, Hash, JSTraceable, MallocSizeOf, PartialEq)]
 struct TexFormatType(u32, u32);
 
-type WebGLQueryParameterFunc = Fn(*mut JSContext, &WebGLRenderingContext)
+type WebGLQueryParameterFunc<TH> = Fn(*mut JSContext, &WebGLRenderingContext<TH>)
                                -> Result<JSVal, WebGLError>;
 
 #[derive(MallocSizeOf)]
-struct WebGLQueryParameterHandler {
+struct WebGLQueryParameterHandler<TH: TypeHolderTrait> {
     #[ignore_malloc_size_of = "Closures are hard"]
-    func: Box<WebGLQueryParameterFunc>
+    func: Box<WebGLQueryParameterFunc<TH>>
 }
 
-unsafe_no_jsmanaged_fields!(WebGLQueryParameterHandler);
+unsafe_no_jsmanaged_fields_generic!(WebGLQueryParameterHandler<TH>);

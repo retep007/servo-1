@@ -69,6 +69,7 @@ use std::cell::{Cell, Ref};
 use std::cmp;
 use std::ptr::{self, NonNull};
 use webrender_api;
+use typeholder::TypeHolderTrait;
 
 type ImagePixelResult = Result<(Vec<u8>, Size2D<i32>, bool), ()>;
 pub const MAX_UNIFORM_AND_ATTRIBUTE_LEN: usize = 256;
@@ -142,12 +143,12 @@ bitflags! {
 /// Information about the bound textures of a WebGL texture unit.
 #[must_root]
 #[derive(JSTraceable, MallocSizeOf)]
-struct TextureUnitBindings {
-    bound_texture_2d: MutNullableDom<WebGLTexture>,
-    bound_texture_cube_map: MutNullableDom<WebGLTexture>,
+struct TextureUnitBindings<TH: TypeHolderTrait> {
+    bound_texture_2d: MutNullableDom<WebGLTexture<TH>>,
+    bound_texture_cube_map: MutNullableDom<WebGLTexture<TH>>,
 }
 
-impl TextureUnitBindings {
+impl<TH: TypeHolderTrait> TextureUnitBindings<TH> {
     fn new() -> Self {
         Self {
             bound_texture_2d: MutNullableDom::new(None),
@@ -157,7 +158,7 @@ impl TextureUnitBindings {
 
     /// Clears the slot associated to the given texture.
     /// Returns the GL target of the cleared slot, if any.
-    fn clear_slot(&self, texture: &WebGLTexture) -> Option<u32> {
+    fn clear_slot(&self, texture: &WebGLTexture<TH>) -> Option<u32> {
         let fields = [(&self.bound_texture_2d, constants::TEXTURE_2D),
                       (&self.bound_texture_cube_map, constants::TEXTURE_CUBE_MAP)];
 
@@ -175,8 +176,8 @@ impl TextureUnitBindings {
 
 
 #[dom_struct]
-pub struct WebGLRenderingContext {
-    reflector_: Reflector,
+pub struct WebGLRenderingContext<TH: TypeHolderTrait> {
+    reflector_: Reflector<TH>,
     #[ignore_malloc_size_of = "Channels are hard"]
     webgl_sender: WebGLMsgSender,
     #[ignore_malloc_size_of = "Defined in webrender"]
@@ -186,37 +187,37 @@ pub struct WebGLRenderingContext {
     glsl_version: WebGLSLVersion,
     #[ignore_malloc_size_of = "Defined in offscreen_gl_context"]
     limits: GLLimits,
-    canvas: Dom<HTMLCanvasElement>,
+    canvas: Dom<HTMLCanvasElement<TH>>,
     #[ignore_malloc_size_of = "Defined in canvas_traits"]
     last_error: Cell<Option<WebGLError>>,
     texture_unpacking_settings: Cell<TextureUnpacking>,
     texture_unpacking_alignment: Cell<u32>,
-    bound_framebuffer: MutNullableDom<WebGLFramebuffer>,
-    bound_renderbuffer: MutNullableDom<WebGLRenderbuffer>,
-    bound_textures: DomRefCell<FnvHashMap<u32, TextureUnitBindings>>,
+    bound_framebuffer: MutNullableDom<WebGLFramebuffer<TH>>,
+    bound_renderbuffer: MutNullableDom<WebGLRenderbuffer<TH>>,
+    bound_textures: DomRefCell<FnvHashMap<u32, TextureUnitBindings<TH>>>,
     bound_texture_unit: Cell<u32>,
-    bound_buffer_array: MutNullableDom<WebGLBuffer>,
-    bound_buffer_element_array: MutNullableDom<WebGLBuffer>,
-    vertex_attribs: VertexAttribs,
-    current_program: MutNullableDom<WebGLProgram>,
+    bound_buffer_array: MutNullableDom<WebGLBuffer<TH>>,
+    bound_buffer_element_array: MutNullableDom<WebGLBuffer<TH>>,
+    vertex_attribs: VertexAttribs<TH>,
+    current_program: MutNullableDom<WebGLProgram<TH>>,
     #[ignore_malloc_size_of = "Because it's small"]
     current_vertex_attrib_0: Cell<(f32, f32, f32, f32)>,
     #[ignore_malloc_size_of = "Because it's small"]
     current_scissor: Cell<(i32, i32, i32, i32)>,
     #[ignore_malloc_size_of = "Because it's small"]
     current_clear_color: Cell<(f32, f32, f32, f32)>,
-    extension_manager: WebGLExtensions,
+    extension_manager: WebGLExtensions<TH>,
     capabilities: Capabilities,
 }
 
-impl WebGLRenderingContext {
+impl<TH: TypeHolderTrait> WebGLRenderingContext<TH> {
     pub fn new_inherited(
-        window: &Window,
-        canvas: &HTMLCanvasElement,
+        window: &Window<TH>,
+        canvas: &HTMLCanvasElement<TH>,
         webgl_version: WebGLVersion,
         size: Size2D<i32>,
         attrs: GLContextAttributes
-    ) -> Result<WebGLRenderingContext, String> {
+    ) -> Result<WebGLRenderingContext<TH>, String> {
         if let Some(true) = PREFS.get("webgl.testing.context_creation_error").as_boolean() {
             return Err("WebGL context creation error forced by pref `webgl.testing.context_creation_error`".into());
         }
@@ -263,12 +264,12 @@ impl WebGLRenderingContext {
 
     #[allow(unrooted_must_root)]
     pub fn new(
-        window: &Window,
-        canvas: &HTMLCanvasElement,
+        window: &Window<TH>,
+        canvas: &HTMLCanvasElement<TH>,
         webgl_version: WebGLVersion,
         size: Size2D<i32>,
         attrs: GLContextAttributes
-    ) -> Option<DomRoot<WebGLRenderingContext>> {
+    ) -> Option<DomRoot<WebGLRenderingContext<TH>>> {
         match WebGLRenderingContext::new_inherited(window, canvas, webgl_version, size, attrs) {
             Ok(ctx) => Some(reflect_dom_object(Box::new(ctx), window, WebGLRenderingContextBinding::Wrap)),
             Err(msg) => {
@@ -278,7 +279,7 @@ impl WebGLRenderingContext {
                                                    EventBubbles::DoesNotBubble,
                                                    EventCancelable::Cancelable,
                                                    DOMString::from(msg));
-                event.upcast::<Event>().fire(canvas.upcast());
+                event.upcast::<Event<TH>>().fire(canvas.upcast());
                 None
             }
         }
@@ -288,7 +289,7 @@ impl WebGLRenderingContext {
         &self.limits
     }
 
-    fn bound_texture(&self, target: u32) -> Option<DomRoot<WebGLTexture>> {
+    fn bound_texture(&self, target: u32) -> Option<DomRoot<WebGLTexture<TH>>> {
         match target {
             constants::TEXTURE_2D => {
                 self.bound_textures.borrow().get(&self.bound_texture_unit.get()).and_then(|t| {
@@ -304,7 +305,7 @@ impl WebGLRenderingContext {
         }
     }
 
-    pub fn bound_texture_for_target(&self, target: &TexImageTarget) -> Option<DomRoot<WebGLTexture>> {
+    pub fn bound_texture_for_target(&self, target: &TexImageTarget) -> Option<DomRoot<WebGLTexture<TH>>> {
         self.bound_textures.borrow().get(&self.bound_texture_unit.get()).and_then(|binding| {
             match *target {
                 TexImageTarget::Texture2D => binding.bound_texture_2d.get(),
@@ -318,15 +319,15 @@ impl WebGLRenderingContext {
         })
     }
 
-    pub fn vertex_attribs(&self) -> &VertexAttribs {
+    pub fn vertex_attribs(&self) -> &VertexAttribs<TH> {
         &self.vertex_attribs
     }
 
-    pub fn bound_buffer_element_array(&self) -> Option<DomRoot<WebGLBuffer>> {
+    pub fn bound_buffer_element_array(&self) -> Option<DomRoot<WebGLBuffer<TH>>> {
         self.bound_buffer_element_array.get()
     }
 
-    pub fn set_bound_buffer_element_array(&self, buffer: Option<&WebGLBuffer>) {
+    pub fn set_bound_buffer_element_array(&self, buffer: Option<&WebGLBuffer<TH>>) {
         self.bound_buffer_element_array.set(buffer);
     }
 
@@ -382,7 +383,7 @@ impl WebGLRenderingContext {
         self.webgl_sender.send_vr(command).unwrap();
     }
 
-    pub fn get_extension_manager<'a>(&'a self) -> &'a WebGLExtensions {
+    pub fn get_extension_manager<'a>(&'a self) -> &'a WebGLExtensions<TH> {
         &self.extension_manager
     }
 
@@ -431,7 +432,7 @@ impl WebGLRenderingContext {
 
     fn validate_ownership<T>(&self, object: &T) -> WebGLResult<()>
     where
-        T: DerivedFrom<WebGLObject>,
+        T: DerivedFrom<WebGLObject<TH>>,
     {
         if self != object.upcast().context() {
             return Err(InvalidOperation);
@@ -439,9 +440,9 @@ impl WebGLRenderingContext {
         Ok(())
     }
 
-    fn with_location<F>(&self, location: Option<&WebGLUniformLocation>, f: F)
+    fn with_location<F>(&self, location: Option<&WebGLUniformLocation<TH>>, f: F)
     where
-        F: FnOnce(&WebGLUniformLocation) -> WebGLResult<()>,
+        F: FnOnce(&WebGLUniformLocation<TH>) -> WebGLResult<()>,
     {
         let location = match location {
             Some(loc) => loc,
@@ -496,7 +497,7 @@ impl WebGLRenderingContext {
     }
 
     fn mark_as_dirty(&self) {
-        self.canvas.upcast::<Node>().dirty(NodeDamage::OtherNodeDamage);
+        self.canvas.upcast::<Node<TH>>().dirty(NodeDamage::OtherNodeDamage);
     }
 
     fn vertex_attrib(&self, indx: u32, x: f32, y: f32, z: f32, w: f32) {
@@ -524,7 +525,7 @@ impl WebGLRenderingContext {
     // LINEAR filtering may be forbidden when using WebGL extensions.
     // https://www.khronos.org/registry/webgl/extensions/OES_texture_float_linear/
     fn validate_filterable_texture(&self,
-                                   texture: &WebGLTexture,
+                                   texture: &WebGLTexture<TH>,
                                    target: TexImageTarget,
                                    level: u32,
                                    format: TexFormat,
@@ -762,7 +763,7 @@ impl WebGLRenderingContext {
 
     fn get_image_pixels(
         &self,
-        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement,
+        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement<TH>,
     ) -> ImagePixelResult {
         // NOTE: Getting the pixels probably can be short-circuited if some
         // parameter is invalid.
@@ -1014,7 +1015,7 @@ impl WebGLRenderingContext {
     }
 
     fn tex_image_2d(&self,
-                    texture: &WebGLTexture,
+                    texture: &WebGLTexture<TH>,
                     target: TexImageTarget,
                     data_type: TexDataType,
                     internal_format: TexFormat,
@@ -1063,7 +1064,7 @@ impl WebGLRenderingContext {
     }
 
     fn tex_sub_image_2d(&self,
-                        texture: DomRoot<WebGLTexture>,
+                        texture: DomRoot<WebGLTexture<TH>>,
                         target: TexImageTarget,
                         level: u32,
                         xoffset: i32,
@@ -1312,7 +1313,7 @@ impl WebGLRenderingContext {
         Some(receiver.recv().unwrap().into())
     }
 
-    pub fn bound_buffer(&self, target: u32) -> WebGLResult<Option<DomRoot<WebGLBuffer>>> {
+    pub fn bound_buffer(&self, target: u32) -> WebGLResult<Option<DomRoot<WebGLBuffer<TH>>>> {
         match target {
             constants::ARRAY_BUFFER => Ok(self.bound_buffer_array.get()),
             constants::ELEMENT_ARRAY_BUFFER => Ok(self.bound_buffer_element_array.get()),
@@ -1336,7 +1337,7 @@ impl WebGLRenderingContext {
     }
 }
 
-impl Drop for WebGLRenderingContext {
+impl<TH: TypeHolderTrait> Drop for WebGLRenderingContext<TH> {
     fn drop(&mut self) {
         let _ = self.webgl_sender.send_remove();
     }
@@ -1355,9 +1356,9 @@ unsafe fn fallible_array_buffer_view_to_vec(
     }
 }
 
-impl WebGLRenderingContextMethods for WebGLRenderingContext {
+impl<TH: TypeHolderTrait> WebGLRenderingContextMethods<TH> for WebGLRenderingContext<TH> {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.1
-    fn Canvas(&self) -> DomRoot<HTMLCanvasElement> {
+    fn Canvas(&self) -> DomRoot<HTMLCanvasElement<TH>> {
         DomRoot::from_ref(&*self.canvas)
     }
 
@@ -1768,27 +1769,27 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn AttachShader(&self, program: &WebGLProgram, shader: &WebGLShader) {
+    fn AttachShader(&self, program: &WebGLProgram<TH>, shader: &WebGLShader<TH>) {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return);
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return);
         handle_potential_webgl_error!(self, program.attach_shader(shader));
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn DetachShader(&self, program: &WebGLProgram, shader: &WebGLShader) {
+    fn DetachShader(&self, program: &WebGLProgram<TH>, shader: &WebGLShader<TH>) {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return);
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return);
         handle_potential_webgl_error!(self, program.detach_shader(shader));
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn BindAttribLocation(&self, program: &WebGLProgram, index: u32, name: DOMString) {
+    fn BindAttribLocation(&self, program: &WebGLProgram<TH>, index: u32, name: DOMString) {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return);
         handle_potential_webgl_error!(self, program.bind_attrib_location(index, name));
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    fn BindBuffer(&self, target: u32, buffer: Option<&WebGLBuffer>) {
+    fn BindBuffer(&self, target: u32, buffer: Option<&WebGLBuffer<TH>>) {
         if let Some(buffer) = buffer {
             handle_potential_webgl_error!(self, self.validate_ownership(buffer), return);
         }
@@ -1813,7 +1814,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.6
-    fn BindFramebuffer(&self, target: u32, framebuffer: Option<&WebGLFramebuffer>) {
+    fn BindFramebuffer(&self, target: u32, framebuffer: Option<&WebGLFramebuffer<TH>>) {
         if let Some(fb) = framebuffer {
             handle_potential_webgl_error!(self, self.validate_ownership(fb), return);
         }
@@ -1843,7 +1844,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.7
-    fn BindRenderbuffer(&self, target: u32, renderbuffer: Option<&WebGLRenderbuffer>) {
+    fn BindRenderbuffer(&self, target: u32, renderbuffer: Option<&WebGLRenderbuffer<TH>>) {
         if let Some(rb) = renderbuffer {
             handle_potential_webgl_error!(self, self.validate_ownership(rb), return);
         }
@@ -1869,7 +1870,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    fn BindTexture(&self, target: u32, texture: Option<&WebGLTexture>) {
+    fn BindTexture(&self, target: u32, texture: Option<&WebGLTexture<TH>>) {
         if let Some(texture) = texture {
             handle_potential_webgl_error!(self, self.validate_ownership(texture), return);
         }
@@ -2196,7 +2197,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn CompileShader(&self, shader: &WebGLShader) {
+    fn CompileShader(&self, shader: &WebGLShader<TH>) {
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return);
         handle_potential_webgl_error!(
             self,
@@ -2210,32 +2211,32 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    fn CreateBuffer(&self) -> Option<DomRoot<WebGLBuffer>> {
+    fn CreateBuffer(&self) -> Option<DomRoot<WebGLBuffer<TH>>> {
         WebGLBuffer::maybe_new(self)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.6
-    fn CreateFramebuffer(&self) -> Option<DomRoot<WebGLFramebuffer>> {
+    fn CreateFramebuffer(&self) -> Option<DomRoot<WebGLFramebuffer<TH>>> {
         WebGLFramebuffer::maybe_new(self)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.7
-    fn CreateRenderbuffer(&self) -> Option<DomRoot<WebGLRenderbuffer>> {
+    fn CreateRenderbuffer(&self) -> Option<DomRoot<WebGLRenderbuffer<TH>>> {
         WebGLRenderbuffer::maybe_new(self)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    fn CreateTexture(&self) -> Option<DomRoot<WebGLTexture>> {
+    fn CreateTexture(&self) -> Option<DomRoot<WebGLTexture<TH>>> {
         WebGLTexture::maybe_new(self)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn CreateProgram(&self) -> Option<DomRoot<WebGLProgram>> {
+    fn CreateProgram(&self) -> Option<DomRoot<WebGLProgram<TH>>> {
         WebGLProgram::maybe_new(self)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn CreateShader(&self, shader_type: u32) -> Option<DomRoot<WebGLShader>> {
+    fn CreateShader(&self, shader_type: u32) -> Option<DomRoot<WebGLShader<TH>>> {
         match shader_type {
             constants::VERTEX_SHADER | constants::FRAGMENT_SHADER => {},
             _ => {
@@ -2247,7 +2248,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    fn DeleteBuffer(&self, buffer: Option<&WebGLBuffer>) {
+    fn DeleteBuffer(&self, buffer: Option<&WebGLBuffer<TH>>) {
         if let Some(buffer) = buffer {
             handle_potential_webgl_error!(self, self.validate_ownership(buffer), return);
 
@@ -2271,7 +2272,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.6
-    fn DeleteFramebuffer(&self, framebuffer: Option<&WebGLFramebuffer>) {
+    fn DeleteFramebuffer(&self, framebuffer: Option<&WebGLFramebuffer<TH>>) {
         if let Some(framebuffer) = framebuffer {
             handle_potential_webgl_error!(self, self.validate_ownership(framebuffer), return);
             handle_object_deletion!(self, self.bound_framebuffer, framebuffer,
@@ -2282,7 +2283,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.7
-    fn DeleteRenderbuffer(&self, renderbuffer: Option<&WebGLRenderbuffer>) {
+    fn DeleteRenderbuffer(&self, renderbuffer: Option<&WebGLRenderbuffer<TH>>) {
         if let Some(renderbuffer) = renderbuffer {
             handle_potential_webgl_error!(self, self.validate_ownership(renderbuffer), return);
             handle_object_deletion!(self, self.bound_renderbuffer, renderbuffer,
@@ -2306,7 +2307,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    fn DeleteTexture(&self, texture: Option<&WebGLTexture>) {
+    fn DeleteTexture(&self, texture: Option<&WebGLTexture<TH>>) {
         if let Some(texture) = texture {
             handle_potential_webgl_error!(self, self.validate_ownership(texture), return);
 
@@ -2350,7 +2351,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn DeleteProgram(&self, program: Option<&WebGLProgram>) {
+    fn DeleteProgram(&self, program: Option<&WebGLProgram<TH>>) {
         if let Some(program) = program {
             handle_potential_webgl_error!(self, self.validate_ownership(program), return);
             program.mark_for_deletion()
@@ -2358,7 +2359,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn DeleteShader(&self, shader: Option<&WebGLShader>) {
+    fn DeleteShader(&self, shader: Option<&WebGLShader<TH>>) {
         if let Some(shader) = shader {
             handle_potential_webgl_error!(self, self.validate_ownership(shader), return);
             shader.mark_for_deletion()
@@ -2501,7 +2502,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
-    fn GetActiveUniform(&self, program: &WebGLProgram, index: u32) -> Option<DomRoot<WebGLActiveInfo>> {
+    fn GetActiveUniform(&self, program: &WebGLProgram<TH>, index: u32) -> Option<DomRoot<WebGLActiveInfo<TH>>> {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return None);
         match program.get_active_uniform(index) {
             Ok(ret) => Some(ret),
@@ -2513,13 +2514,13 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
-    fn GetActiveAttrib(&self, program: &WebGLProgram, index: u32) -> Option<DomRoot<WebGLActiveInfo>> {
+    fn GetActiveAttrib(&self, program: &WebGLProgram<TH>, index: u32) -> Option<DomRoot<WebGLActiveInfo<TH>>> {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return None);
         handle_potential_webgl_error!(self, program.get_active_attrib(index).map(Some), None)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
-    fn GetAttribLocation(&self, program: &WebGLProgram, name: DOMString) -> i32 {
+    fn GetAttribLocation(&self, program: &WebGLProgram<TH>, name: DOMString) -> i32 {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return -1);
         handle_potential_webgl_error!(self, program.get_attrib_location(name), -1)
     }
@@ -2680,7 +2681,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn GetProgramInfoLog(&self, program: &WebGLProgram) -> Option<DOMString> {
+    fn GetProgramInfoLog(&self, program: &WebGLProgram<TH>) -> Option<DOMString> {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return None);
         match program.get_info_log() {
             Ok(value) => Some(DOMString::from(value)),
@@ -2693,7 +2694,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    unsafe fn GetProgramParameter(&self, _: *mut JSContext, program: &WebGLProgram, param: u32) -> JSVal {
+    unsafe fn GetProgramParameter(&self, _: *mut JSContext, program: &WebGLProgram<TH>, param: u32) -> JSVal {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return NullValue());
         if program.is_deleted() {
             self.webgl_error(InvalidOperation);
@@ -2723,14 +2724,14 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn GetShaderInfoLog(&self, shader: &WebGLShader) -> Option<DOMString> {
+    fn GetShaderInfoLog(&self, shader: &WebGLShader<TH>) -> Option<DOMString> {
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return None);
         Some(shader.info_log())
     }
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    unsafe fn GetShaderParameter(&self, _: *mut JSContext, shader: &WebGLShader, param: u32) -> JSVal {
+    unsafe fn GetShaderParameter(&self, _: *mut JSContext, shader: &WebGLShader<TH>, param: u32) -> JSVal {
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return NullValue());
         if shader.is_deleted() {
             self.webgl_error(InvalidValue);
@@ -2752,7 +2753,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         &self,
         shader_type: u32,
         precision_type: u32
-    ) -> Option<DomRoot<WebGLShaderPrecisionFormat>> {
+    ) -> Option<DomRoot<WebGLShaderPrecisionFormat<TH>>> {
         match precision_type {
             constants::LOW_FLOAT |
             constants::MEDIUM_FLOAT |
@@ -2778,9 +2779,9 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn GetUniformLocation(
         &self,
-        program: &WebGLProgram,
+        program: &WebGLProgram<TH>,
         name: DOMString,
-    ) -> Option<DomRoot<WebGLUniformLocation>> {
+    ) -> Option<DomRoot<WebGLUniformLocation<TH>>> {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return None);
         handle_potential_webgl_error!(self, program.get_uniform_location(name), None)
     }
@@ -2873,7 +2874,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    fn IsBuffer(&self, buffer: Option<&WebGLBuffer>) -> bool {
+    fn IsBuffer(&self, buffer: Option<&WebGLBuffer<TH>>) -> bool {
         buffer.map_or(false, |buf| {
             self.validate_ownership(buf).is_ok() && buf.target().is_some() && !buf.is_deleted()
         })
@@ -2885,31 +2886,31 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.6
-    fn IsFramebuffer(&self, frame_buffer: Option<&WebGLFramebuffer>) -> bool {
+    fn IsFramebuffer(&self, frame_buffer: Option<&WebGLFramebuffer<TH>>) -> bool {
         frame_buffer.map_or(false, |buf| {
             self.validate_ownership(buf).is_ok() && buf.target().is_some() && !buf.is_deleted()
         })
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn IsProgram(&self, program: Option<&WebGLProgram>) -> bool {
+    fn IsProgram(&self, program: Option<&WebGLProgram<TH>>) -> bool {
         program.map_or(false, |p| self.validate_ownership(p).is_ok() && !p.is_deleted())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.7
-    fn IsRenderbuffer(&self, render_buffer: Option<&WebGLRenderbuffer>) -> bool {
+    fn IsRenderbuffer(&self, render_buffer: Option<&WebGLRenderbuffer<TH>>) -> bool {
         render_buffer.map_or(false, |buf| {
             self.validate_ownership(buf).is_ok() && buf.ever_bound() && !buf.is_deleted()
         })
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn IsShader(&self, shader: Option<&WebGLShader>) -> bool {
+    fn IsShader(&self, shader: Option<&WebGLShader<TH>>) -> bool {
         shader.map_or(false, |s| self.validate_ownership(s).is_ok() && !s.is_deleted())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    fn IsTexture(&self, texture: Option<&WebGLTexture>) -> bool {
+    fn IsTexture(&self, texture: Option<&WebGLTexture<TH>>) -> bool {
         texture.map_or(false, |tex| {
             self.validate_ownership(tex).is_ok() && tex.target().is_some() && !tex.is_deleted()
         })
@@ -3168,7 +3169,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn LinkProgram(&self, program: &WebGLProgram) {
+    fn LinkProgram(&self, program: &WebGLProgram<TH>) {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return);
         if program.is_deleted() {
             return self.webgl_error(InvalidValue);
@@ -3177,13 +3178,13 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn ShaderSource(&self, shader: &WebGLShader, source: DOMString) {
+    fn ShaderSource(&self, shader: &WebGLShader<TH>, source: DOMString) {
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return);
         shader.set_source(source)
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn GetShaderSource(&self, shader: &WebGLShader) -> Option<DOMString> {
+    fn GetShaderSource(&self, shader: &WebGLShader<TH>) -> Option<DOMString> {
         handle_potential_webgl_error!(self, self.validate_ownership(shader), return None);
         Some(shader.source())
     }
@@ -3191,7 +3192,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform1f(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: f32,
     ) {
         self.with_location(location, |location| {
@@ -3207,7 +3208,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform1i(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: i32,
     ) {
         self.with_location(location, |location| {
@@ -3228,7 +3229,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform1iv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Int32ArrayOrLongSequence,
     ) {
         self.with_location(location, |location| {
@@ -3264,7 +3265,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform1fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
         self.with_location(location, |location| {
@@ -3290,7 +3291,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform2f(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: f32,
         y: f32,
     ) {
@@ -3307,7 +3308,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform2fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
         self.with_location(location, |location| {
@@ -3333,7 +3334,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform2i(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: i32,
         y: i32,
     ) {
@@ -3350,7 +3351,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform2iv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Int32ArrayOrLongSequence,
     ) {
         self.with_location(location, |location| {
@@ -3376,7 +3377,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform3f(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: f32,
         y: f32,
         z: f32,
@@ -3394,7 +3395,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform3fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
         self.with_location(location, |location| {
@@ -3420,7 +3421,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform3i(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: i32,
         y: i32,
         z: i32,
@@ -3438,7 +3439,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform3iv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Int32ArrayOrLongSequence,
     ) {
         self.with_location(location, |location| {
@@ -3464,7 +3465,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform4i(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: i32,
         y: i32,
         z: i32,
@@ -3484,7 +3485,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform4iv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Int32ArrayOrLongSequence,
     ) {
         self.with_location(location, |location| {
@@ -3510,7 +3511,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform4f(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         x: f32,
         y: f32,
         z: f32,
@@ -3529,7 +3530,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn Uniform4fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
         self.with_location(location, |location| {
@@ -3555,7 +3556,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn UniformMatrix2fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         transpose: bool,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
@@ -3585,7 +3586,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn UniformMatrix3fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         transpose: bool,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
@@ -3615,7 +3616,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.10
     fn UniformMatrix4fv(
         &self,
-        location: Option<&WebGLUniformLocation>,
+        location: Option<&WebGLUniformLocation<TH>>,
         transpose: bool,
         val: Float32ArrayOrUnrestrictedFloatSequence,
     ) {
@@ -3647,8 +3648,8 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     unsafe fn GetUniform(
         &self,
         cx: *mut JSContext,
-        program: &WebGLProgram,
-        location: &WebGLUniformLocation,
+        program: &WebGLProgram<TH>,
+        location: &WebGLUniformLocation<TH>,
     ) -> JSVal {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return NullValue());
 
@@ -3662,8 +3663,8 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             return NullValue();
         }
 
-        fn get<T, F>(
-            triple: (&WebGLRenderingContext, WebGLProgramId, i32),
+        fn get<T, F, THH: TypeHolderTrait>(
+            triple: (&WebGLRenderingContext<THH>, WebGLProgramId, i32),
             f: F,
         ) -> T
         where
@@ -3722,7 +3723,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn UseProgram(&self, program: Option<&WebGLProgram>) {
+    fn UseProgram(&self, program: Option<&WebGLProgram<TH>>) {
         if let Some(program) = program {
             handle_potential_webgl_error!(self, self.validate_ownership(program), return);
             if program.is_deleted() || !program.is_linked() {
@@ -3742,7 +3743,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn ValidateProgram(&self, program: &WebGLProgram) {
+    fn ValidateProgram(&self, program: &WebGLProgram<TH>) {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return);
         if let Err(e) = program.validate() {
             self.webgl_error(e);
@@ -3936,7 +3937,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         internal_format: u32,
         format: u32,
         data_type: u32,
-        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement,
+        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement<TH>,
     ) -> ErrorResult {
         if !self.extension_manager.is_tex_type_enabled(data_type) {
             return Ok(self.webgl_error(InvalidEnum));
@@ -3989,7 +3990,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                    height: i32,
                    format: u32,
                    data_type: u32,
-                   source: &HTMLIFrameElement) -> ErrorResult {
+                   source: &HTMLIFrameElement<TH>) -> ErrorResult {
         // Currently DOMToTexture only supports TEXTURE_2D, RGBA, UNSIGNED_BYTE and no levels.
         if target != constants::TEXTURE_2D || level != 0 || internal_format != constants::RGBA ||
             format != constants::RGBA || data_type != constants::UNSIGNED_BYTE {
@@ -4005,7 +4006,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         };
 
         let pipeline_id = source.pipeline_id().ok_or(Error::InvalidState)?;
-        let document_id  = self.global().downcast::<Window>().ok_or(Error::InvalidState)?.webrender_document();
+        let document_id  = self.global().downcast::<Window<TH>>().ok_or(Error::InvalidState)?.webrender_document();
 
         texture.set_attached_to_dom();
 
@@ -4094,7 +4095,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         yoffset: i32,
         format: u32,
         data_type: u32,
-        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement,
+        source: ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement<TH>,
     ) -> ErrorResult {
         let (pixels, size, premultiplied) = match self.get_image_pixels(source) {
             Ok((pixels, size, premultiplied)) => (pixels, size, premultiplied),
@@ -4187,7 +4188,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         target: u32,
         attachment: u32,
         renderbuffertarget: u32,
-        rb: Option<&WebGLRenderbuffer>,
+        rb: Option<&WebGLRenderbuffer<TH>>,
     ) {
         if let Some(rb) = rb {
             handle_potential_webgl_error!(self, self.validate_ownership(rb), return);
@@ -4209,7 +4210,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         target: u32,
         attachment: u32,
         textarget: u32,
-        texture: Option<&WebGLTexture>,
+        texture: Option<&WebGLTexture<TH>>,
         level: i32,
     ) {
         if let Some(texture) = texture {
@@ -4227,7 +4228,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     }
 
     /// https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.9
-    fn GetAttachedShaders(&self, program: &WebGLProgram) -> Option<Vec<DomRoot<WebGLShader>>> {
+    fn GetAttachedShaders(&self, program: &WebGLProgram<TH>) -> Option<Vec<DomRoot<WebGLShader<TH>>>> {
         handle_potential_webgl_error!(self, self.validate_ownership(program), return None);
         handle_potential_webgl_error!(self, program.attached_shaders().map(Some), None)
     }
@@ -4238,7 +4239,7 @@ pub trait LayoutCanvasWebGLRenderingContextHelpers {
     unsafe fn canvas_data_source(&self) -> HTMLCanvasDataSource;
 }
 
-impl LayoutCanvasWebGLRenderingContextHelpers for LayoutDom<WebGLRenderingContext> {
+impl<TH: TypeHolderTrait> LayoutCanvasWebGLRenderingContextHelpers for LayoutDom<WebGLRenderingContext<TH>> {
     #[allow(unsafe_code)]
     unsafe fn canvas_data_source(&self) -> HTMLCanvasDataSource {
         HTMLCanvasDataSource::WebGL((*self.unsafe_get()).layout_handle())
@@ -4247,11 +4248,11 @@ impl LayoutCanvasWebGLRenderingContextHelpers for LayoutDom<WebGLRenderingContex
 
 #[derive(JSTraceable, MallocSizeOf)]
 #[must_root]
-pub struct VertexAttribs {
-    attribs: DomRefCell<Box<[VertexAttribData]>>,
+pub struct VertexAttribs<TH: TypeHolderTrait> {
+    attribs: DomRefCell<Box<[VertexAttribData<TH>]>>,
 }
 
-impl VertexAttribs {
+impl<TH: TypeHolderTrait> VertexAttribs<TH> {
     pub fn new(max: u32) -> Self {
         // High-end GPUs have 16 of those, let's just use a boxed slice.
         Self { attribs: DomRefCell::new(vec![Default::default(); max as usize].into()) }
@@ -4275,7 +4276,7 @@ impl VertexAttribs {
         normalized: bool,
         stride: i32,
         offset: i64,
-        buffer: Option<&WebGLBuffer>,
+        buffer: Option<&WebGLBuffer<TH>>,
     ) -> WebGLResult<()> {
         let mut attribs = self.attribs.borrow_mut();
         let data = attribs.get_mut(index as usize).ok_or(InvalidValue)?;
@@ -4315,11 +4316,11 @@ impl VertexAttribs {
         Ok(())
     }
 
-    pub fn borrow(&self) -> Ref<[VertexAttribData]> {
+    pub fn borrow(&self) -> Ref<[VertexAttribData<TH>]> {
         Ref::map(self.attribs.borrow(), |attribs| &**attribs)
     }
 
-    fn delete_buffer(&self, buffer: &WebGLBuffer) {
+    fn delete_buffer(&self, buffer: &WebGLBuffer<TH>) {
         for attrib in &mut **self.attribs.borrow_mut() {
             if attrib.buffer().map_or(false, |b| b.id() == buffer.id()) {
                 attrib.buffer = None;
@@ -4327,7 +4328,7 @@ impl VertexAttribs {
         }
     }
 
-    fn get(&self, index: u32) -> Option<Ref<VertexAttribData>> {
+    fn get(&self, index: u32) -> Option<Ref<VertexAttribData<TH>>> {
         ref_filter_map(self.attribs.borrow(), |attribs| attribs.get(index as usize))
     }
 
@@ -4386,7 +4387,7 @@ impl VertexAttribs {
 
 #[derive(Clone, JSTraceable, MallocSizeOf)]
 #[must_root]
-pub struct VertexAttribData {
+pub struct VertexAttribData<TH: TypeHolderTrait> {
     enabled_as_array: bool,
     size: u8,
     type_: u32,
@@ -4394,11 +4395,11 @@ pub struct VertexAttribData {
     normalized: bool,
     stride: u8,
     offset: u32,
-    buffer: Option<Dom<WebGLBuffer>>,
+    buffer: Option<Dom<WebGLBuffer<TH>>>,
     divisor: u32,
 }
 
-impl Default for VertexAttribData {
+impl<TH: TypeHolderTrait> Default for VertexAttribData<TH> {
     #[allow(unrooted_must_root)]
     fn default() -> Self {
         Self {
@@ -4415,8 +4416,8 @@ impl Default for VertexAttribData {
     }
 }
 
-impl VertexAttribData {
-    pub fn buffer(&self) -> Option<&WebGLBuffer> {
+impl<TH: TypeHolderTrait> VertexAttribData<TH> {
+    pub fn buffer(&self) -> Option<&WebGLBuffer<TH>> {
         self.buffer.as_ref().map(|b| &**b)
     }
 

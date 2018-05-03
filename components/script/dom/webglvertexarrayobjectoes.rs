@@ -11,19 +11,20 @@ use dom::webglobject::WebGLObject;
 use dom::webglrenderingcontext::{VertexAttribs, WebGLRenderingContext};
 use dom_struct::dom_struct;
 use std::cell::Cell;
+use typeholder::TypeHolderTrait;
 
 #[dom_struct]
-pub struct WebGLVertexArrayObjectOES {
-    webgl_object_: WebGLObject,
+pub struct WebGLVertexArrayObjectOES<TH: TypeHolderTrait> {
+    webgl_object_: WebGLObject<TH>,
     id: WebGLVertexArrayId,
     ever_bound: Cell<bool>,
     is_deleted: Cell<bool>,
-    vertex_attribs: VertexAttribs,
-    bound_buffer_element_array: MutNullableDom<WebGLBuffer>,
+    vertex_attribs: VertexAttribs<TH>,
+    bound_buffer_element_array: MutNullableDom<WebGLBuffer<TH>>,
 }
 
-impl WebGLVertexArrayObjectOES {
-    fn new_inherited(context: &WebGLRenderingContext, id: WebGLVertexArrayId) -> Self {
+impl<TH: TypeHolderTrait> WebGLVertexArrayObjectOES<TH> {
+    fn new_inherited(context: &WebGLRenderingContext<TH>, id: WebGLVertexArrayId) -> Self {
         Self {
             webgl_object_: WebGLObject::new_inherited(context),
             id: id,
@@ -34,7 +35,7 @@ impl WebGLVertexArrayObjectOES {
         }
     }
 
-    pub fn new(context: &WebGLRenderingContext, id: WebGLVertexArrayId) -> DomRoot<Self> {
+    pub fn new(context: &WebGLRenderingContext<TH>, id: WebGLVertexArrayId) -> DomRoot<Self> {
         reflect_dom_object(
             Box::new(WebGLVertexArrayObjectOES::new_inherited(context, id)),
             &*context.global(),
@@ -42,7 +43,7 @@ impl WebGLVertexArrayObjectOES {
         )
     }
 
-    pub fn vertex_attribs(&self) -> &VertexAttribs {
+    pub fn vertex_attribs(&self) -> &VertexAttribs<TH> {
         &self.vertex_attribs
     }
 
@@ -66,11 +67,11 @@ impl WebGLVertexArrayObjectOES {
         self.ever_bound.set(true);
     }
 
-    pub fn bound_buffer_element_array(&self) -> Option<DomRoot<WebGLBuffer>> {
+    pub fn bound_buffer_element_array(&self) -> Option<DomRoot<WebGLBuffer<TH>>> {
         self.bound_buffer_element_array.get()
     }
 
-    pub fn set_bound_buffer_element_array(&self, buffer: Option<&WebGLBuffer>) {
+    pub fn set_bound_buffer_element_array(&self, buffer: Option<&WebGLBuffer<TH>>) {
         self.bound_buffer_element_array.set(buffer);
     }
 }

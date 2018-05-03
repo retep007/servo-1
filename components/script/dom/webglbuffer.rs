@@ -16,11 +16,11 @@ use dom::webglrenderingcontext::WebGLRenderingContext;
 use dom_struct::dom_struct;
 use std::cell::Cell;
 use std::collections::HashSet;
-
+use typeholder::TypeHolderTrait;
 
 #[dom_struct]
-pub struct WebGLBuffer {
-    webgl_object: WebGLObject,
+pub struct WebGLBuffer<TH: TypeHolderTrait> {
+    webgl_object: WebGLObject<TH>,
     id: WebGLBufferId,
     /// The target to which this buffer was bound the first time
     target: Cell<Option<u32>>,
@@ -33,8 +33,8 @@ pub struct WebGLBuffer {
     usage: Cell<u32>,
 }
 
-impl WebGLBuffer {
-    fn new_inherited(context: &WebGLRenderingContext, id: WebGLBufferId) -> Self {
+impl<TH: TypeHolderTrait> WebGLBuffer<TH> {
+    fn new_inherited(context: &WebGLRenderingContext<TH>, id: WebGLBufferId) -> Self {
         Self {
             webgl_object: WebGLObject::new_inherited(context),
             id: id,
@@ -47,13 +47,13 @@ impl WebGLBuffer {
         }
     }
 
-    pub fn maybe_new(context: &WebGLRenderingContext) -> Option<DomRoot<Self>> {
+    pub fn maybe_new(context: &WebGLRenderingContext<TH>) -> Option<DomRoot<Self>> {
         let (sender, receiver) = webgl_channel().unwrap();
         context.send_command(WebGLCommand::CreateBuffer(sender));
         receiver.recv().unwrap().map(|id| WebGLBuffer::new(context, id))
     }
 
-    pub fn new(context: &WebGLRenderingContext, id: WebGLBufferId) -> DomRoot<Self> {
+    pub fn new(context: &WebGLRenderingContext<TH>, id: WebGLBufferId) -> DomRoot<Self> {
         reflect_dom_object(
             Box::new(WebGLBuffer::new_inherited(context, id)),
             &*context.global(),
@@ -63,7 +63,7 @@ impl WebGLBuffer {
 }
 
 
-impl WebGLBuffer {
+impl<TH: TypeHolderTrait> WebGLBuffer<TH> {
     pub fn id(&self) -> WebGLBufferId {
         self.id
     }
@@ -80,7 +80,7 @@ impl WebGLBuffer {
         } else {
             self.target.set(Some(target));
         }
-        self.upcast::<WebGLObject>()
+        self.upcast::<WebGLObject<TH>>()
             .context()
             .send_command(WebGLCommand::BindBuffer(target, Some(self.id)));
         Ok(())
@@ -105,7 +105,7 @@ impl WebGLBuffer {
         let data = data.into();
         self.capacity.set(data.len());
         self.usage.set(usage);
-        self.upcast::<WebGLObject>()
+        self.upcast::<WebGLObject<TH>>()
             .context()
             .send_command(WebGLCommand::BufferData(target, data.into(), usage));
         Ok(())
@@ -118,7 +118,7 @@ impl WebGLBuffer {
     pub fn delete(&self) {
         if !self.is_deleted.get() {
             self.is_deleted.set(true);
-            self.upcast::<WebGLObject>()
+            self.upcast::<WebGLObject<TH>>()
                 .context()
                 .send_command(WebGLCommand::DeleteBuffer(self.id));
         }
@@ -160,7 +160,7 @@ impl WebGLBuffer {
         if let Some(ref mut vao_refs) = *self.vao_references.borrow_mut() {
             if vao_refs.take(&id).is_some() && self.pending_delete.get() {
                 // WebGL spec: The deleted buffers should no longer be valid when the VAOs are deleted
-                self.upcast::<WebGLObject>()
+                self.upcast::<WebGLObject<TH>>()
                     .context()
                     .send_command(WebGLCommand::DeleteBuffer(self.id));
                 self.is_deleted.set(true);
@@ -173,7 +173,7 @@ impl WebGLBuffer {
     }
 }
 
-impl Drop for WebGLBuffer {
+impl<TH: TypeHolderTrait> Drop for WebGLBuffer<TH> {
     fn drop(&mut self) {
         self.delete();
     }
