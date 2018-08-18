@@ -2282,10 +2282,11 @@ static PrototypeClass: JSClass = JSClass {
 
 
 class CGInterfaceObjectJSClass(CGThing):
-    def __init__(self, descriptor):
+    def __init__(self, descriptor, defineVars):
         assert descriptor.interface.hasInterfaceObject() and not descriptor.interface.isCallback()
         CGThing.__init__(self)
         self.descriptor = descriptor
+        self.defineVars = defineVars
 
     def define(self):
         if self.descriptor.interface.isNamespace():
@@ -2300,7 +2301,7 @@ static mut NAMESPACE_OBJECT_CLASS: NamespaceObjectClass = unsafe {
 };
 """ % str_to_const_array(classString)
         if self.descriptor.interface.ctor():
-            constructorBehavior = "InterfaceConstructorBehavior::call(%s)" % CONSTRUCT_HOOK_NAME.upper()
+            constructorBehavior = "InterfaceConstructorBehavior::call(%s::<TH>)" % CONSTRUCT_HOOK_NAME
         else:
             constructorBehavior = "InterfaceConstructorBehavior::throw()"
         name = self.descriptor.interface.identifier.name
@@ -2310,13 +2311,14 @@ static mut NAMESPACE_OBJECT_CLASS: NamespaceObjectClass = unsafe {
             "representation": 'b"function %s() {\\n    [native code]\\n}"' % name,
             "depth": self.descriptor.prototypeDepth
         }
+        if self.defineVars:
+            return "static mut INTERFACE_OBJECT_CLASS: Option<NonCallbackInterfaceObjectClass> = None;"
         return """\
-static mut INTERFACE_OBJECT_CLASS: NonCallbackInterfaceObjectClass =
-    NonCallbackInterfaceObjectClass::new(
+INTERFACE_OBJECT_CLASS = Some(NonCallbackInterfaceObjectClass::new(
         &%(constructorBehavior)s,
         %(representation)s,
         PrototypeList::ID::%(id)s,
-        %(depth)s);
+        %(depth)s));
 """ % args
 
 
@@ -3031,10 +3033,15 @@ rooted!(in(cx) let interface_proto = JS_GetFunctionPrototype(cx, global));"""))
 assert!(!interface_proto.is_null());
 
 rooted!(in(cx) let mut interface = ptr::null_mut::<JSObject>());
+let interface_object = match INTERFACE_OBJECT_CLASS {
+    Some(ref obj) => obj,
+    None => unreachable!(),
+};
+
 create_noncallback_interface_object(cx,
                                     global.into(),
                                     interface_proto.handle(),
-                                    &INTERFACE_OBJECT_CLASS,
+                                    interface_object,
                                     %(static_methods)s,
                                     %(static_attrs)s,
                                     %(consts)s,
@@ -3109,7 +3116,7 @@ assert!((*cache)[PrototypeList::Constructor::%(id)s as usize].is_null());
                 hook = CONSTRUCT_HOOK_NAME + "_" + constructor.identifier.name
                 name = str_to_const_array(constructor.identifier.name)
                 length = methodLength(constructor)
-                specs.append(CGGeneric("(%s as ConstructorClassHook, %s, %d)" % (hook.upper(), name, length)))
+                specs.append(CGGeneric("(%s::<TH> as ConstructorClassHook, %s, %d)" % (hook, name, length)))
             values = CGIndenter(CGList(specs, "\n"), 4)
             code.append(CGWrapper(values, pre="%s = [\n" % decl, post="\n];"))
             code.append(CGGeneric("create_named_constructors(cx, global, &named_constructors, prototype.handle());"))
@@ -3297,6 +3304,8 @@ class CGInitTypeHoldedMethod(CGAbstractMethod):
                 define += CGDOMJSProxyHandlerDOMClass(self.descriptor, False).define()
             else:
                 define += CGDOMJSClass(self.descriptor, False).define()
+        if self.descriptor.interface.hasInterfaceObject() and not self.descriptor.interface.isCallback() and not self.descriptor.interface.isNamespace():
+            define += CGInterfaceObjectJSClass(self.descriptor, False).define()
         return CGGeneric(define)
 
 
@@ -5631,13 +5640,6 @@ class CGClassConstructHook(CGAbstractExternMethod):
         self.constructor = constructor
         self.exposureSet = descriptor.interface.exposureSet
 
-    def define(self):
-        result = """unsafe extern "C" fn %s(cx: *mut JSContext, argc: u32, vp: *mut JSVal) -> bool {
-            unimplemented!()
-        }""" % self.name.upper()
-        result += super(CGClassConstructHook, self).define()
-        return result
-
     def definition_body(self):
         preamble = """let global = GlobalScope::from_object(JS_CALLEE(cx, vp).to_object());\n"""
         if len(self.exposureSet) == 1:
@@ -6274,7 +6276,7 @@ class CGDescriptor(CGThing):
                 for ctor in descriptor.interface.namedConstructors:
                     cgThings.append(CGClassConstructHook(descriptor, ctor))
                 if not descriptor.interface.isCallback():
-                    cgThings.append(CGInterfaceObjectJSClass(descriptor))
+                    cgThings.append(CGInterfaceObjectJSClass(descriptor, True))
                 if descriptor.shouldHaveGetConstructorObjectMethod():
                     cgThings.append(CGGetConstructorObjectMethod(descriptor))
                     reexports.append('GetConstructorObject')
